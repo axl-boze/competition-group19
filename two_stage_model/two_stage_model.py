@@ -89,9 +89,10 @@ def parse_args():
         help="動作確認用。指定した場合は train の先頭行だけで学習する。",
     )
     parser.add_argument(
-        "--output",
+        "--output-dir",
         type=Path,
-        default=ROOT_DIR / "two_stage_model" / "y_pred_two_stage.csv",
+        default=ROOT_DIR / "two_stage_model",
+        help="予測ファイルの保存先ディレクトリ。",
     )
     return parser.parse_args()
 
@@ -417,6 +418,8 @@ def print_cv_report(y_train, oof_reg_preds, oof_positive_probs, threshold):
     )
 
     print("\n--- 閾値別 CV MSE ---")
+    best_threshold = None
+    best_threshold_mse = float("inf")
     for th in THRESHOLD_CANDIDATES:
         preds = np.where(oof_positive_probs < th, 0.0, oof_reg_preds)
         preds = np.clip(preds, 0, 100)
@@ -424,20 +427,75 @@ def print_cv_report(y_train, oof_reg_preds, oof_positive_probs, threshold):
         recall = recall_score(y_is_positive, oof_positive_probs >= th, zero_division=0)
         print(f"threshold={th:.1f}: MSE={mse:.4f}, positive_recall={recall:.4f}")
 
+        if mse < best_threshold_mse:
+            best_threshold_mse = mse
+            best_threshold = th
+
+    print(
+        f"\n最良 threshold: {best_threshold:.1f} "
+        f"(CV MSE={best_threshold_mse:.4f})"
+    )
+
     prob_mul_preds = np.clip(oof_positive_probs * oof_reg_preds, 0, 100)
     prob_mul_mse = mean_squared_error(y_train, prob_mul_preds)
     print(f"\n確率掛け合わせ CV MSE: {prob_mul_mse:.4f}")
 
-    return final_oof
+    return final_oof, best_threshold, best_threshold_mse, prob_mul_mse
 
 
-def save_predictions(test_reg_preds, test_positive_probs, threshold, output_path):
+def format_threshold_for_filename(threshold):
+    return f"{threshold:g}".replace(".", "_")
+
+
+def make_threshold_predictions(test_reg_preds, test_positive_probs, threshold):
     test_preds = np.where(test_positive_probs < threshold, 0.0, test_reg_preds)
-    test_preds = np.clip(test_preds, 0, 100)
+    return np.clip(test_preds, 0, 100)
 
+
+def make_probability_multiply_predictions(test_reg_preds, test_positive_probs):
+    return np.clip(test_positive_probs * test_reg_preds, 0, 100)
+
+
+def save_prediction_file(predictions, output_path):
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    np.savetxt(X=test_preds, fname=output_path)
-    print(f"\n予測結果を '{output_path}' に保存しました。")
+    np.savetxt(X=predictions, fname=output_path)
+    print(f"予測結果を '{output_path}' に保存しました。")
+
+
+def save_default_predictions(
+    test_reg_preds,
+    test_positive_probs,
+    selected_threshold,
+    best_threshold,
+    output_dir,
+):
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    selected_threshold_name = format_threshold_for_filename(selected_threshold)
+    selected_threshold_preds = make_threshold_predictions(
+        test_reg_preds, test_positive_probs, selected_threshold
+    )
+    save_prediction_file(
+        selected_threshold_preds,
+        output_dir / f"y_pred_two_stage_threshold_{selected_threshold_name}.csv",
+    )
+
+    best_threshold_name = format_threshold_for_filename(best_threshold)
+    best_threshold_preds = make_threshold_predictions(
+        test_reg_preds, test_positive_probs, best_threshold
+    )
+    save_prediction_file(
+        best_threshold_preds,
+        output_dir / f"y_pred_two_stage_best_threshold_{best_threshold_name}.csv",
+    )
+
+    prob_mul_preds = make_probability_multiply_predictions(
+        test_reg_preds, test_positive_probs
+    )
+    save_prediction_file(
+        prob_mul_preds,
+        output_dir / "y_pred_two_stage_prob_mul.csv",
+    )
 
 
 def main():
@@ -468,8 +526,21 @@ def main():
         early_stopping_rounds=args.early_stopping_rounds,
     )
 
-    print_cv_report(y_train, oof_reg_preds, oof_positive_probs, args.threshold)
-    save_predictions(test_reg_preds, test_positive_probs, args.threshold, args.output)
+    _, best_threshold, best_threshold_mse, prob_mul_mse = print_cv_report(
+        y_train, oof_reg_preds, oof_positive_probs, args.threshold
+    )
+
+    print("\n--- 予測ファイルを保存します ---")
+    print(f"指定 threshold: {args.threshold:.2f}")
+    print(f"最良 threshold: {best_threshold:.2f} (CV MSE={best_threshold_mse:.4f})")
+    print(f"確率掛け合わせ CV MSE: {prob_mul_mse:.4f}")
+    save_default_predictions(
+        test_reg_preds=test_reg_preds,
+        test_positive_probs=test_positive_probs,
+        selected_threshold=args.threshold,
+        best_threshold=best_threshold,
+        output_dir=args.output_dir,
+    )
 
     print("\n--- 回帰モデルの特徴量重要度 (上位25個) ---")
     feature_names = list(df_train_features.columns) + ["te_track_genre"]
