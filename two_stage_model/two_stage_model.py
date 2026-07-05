@@ -23,6 +23,56 @@ EXCLUDE_FEATURES = []
 ROOT_DIR = Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT_DIR / "data"
 
+TRACK_NAME_SVD_COMPONENTS = 5
+ARTISTS_SVD_COMPONENTS = 10
+RARE_CATEGORY_THRESHOLD = 3
+N_AUDIO_CLUSTERS = 10
+THRESHOLD_CANDIDATES = [0.2, 0.3, 0.4, 0.5, 0.6]
+
+AUDIO_COLS = [
+    "danceability",
+    "energy",
+    "loudness",
+    "speechiness",
+    "acousticness",
+    "instrumentalness",
+    "liveness",
+    "valence",
+    "tempo",
+]
+
+GROUP_KEYS = ["track_genre", "main_artist"]
+AGG_TARGET_VALUES = [
+    "danceability",
+    "energy",
+    "loudness",
+    "tempo",
+    "acousticness",
+    "duration_ms",
+]
+
+BASE_CATEGORICAL_FEATURES = [
+    "artists",
+    "main_artist",
+    "album_name",
+    "explicit",
+    "track_genre",
+    "audio_cluster",
+    "mode",
+    "key",
+    "time_signature",
+]
+
+CATBOOST_BASE_PARAMS = {
+    "learning_rate": 0.06530709863955916,
+    "depth": 9,
+    "l2_leaf_reg": 1.6325232667516456,
+    "random_strength": 6.95927721754944,
+    "bagging_temperature": 0.3565475988102846,
+    "verbose": 300,
+    "thread_count": -1,
+}
+
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -96,9 +146,9 @@ def make_features(d_train, d_test):
     )
     track_name_tfidf = tfidf_track.fit_transform(d_all["track_name"])
 
-    svd_track = TruncatedSVD(n_components=5, random_state=42)
+    svd_track = TruncatedSVD(n_components=TRACK_NAME_SVD_COMPONENTS, random_state=42)
     track_name_svd = svd_track.fit_transform(track_name_tfidf)
-    for i in range(5):
+    for i in range(TRACK_NAME_SVD_COMPONENTS):
         d_all[f"track_name_svd_{i}"] = track_name_svd[:, i]
 
     d_all["is_remix"] = d_all["track_name"].str.contains(
@@ -118,9 +168,9 @@ def make_features(d_train, d_test):
     tfidf_art = TfidfVectorizer(analyzer="word", token_pattern=r"[^;]+", min_df=2)
     artists_tfidf = tfidf_art.fit_transform(d_all["artists"])
 
-    svd_art = TruncatedSVD(n_components=10, random_state=42)
+    svd_art = TruncatedSVD(n_components=ARTISTS_SVD_COMPONENTS, random_state=42)
     artists_svd = svd_art.fit_transform(artists_tfidf)
-    for i in range(10):
+    for i in range(ARTISTS_SVD_COMPONENTS):
         d_all[f"artists_svd_{i}"] = artists_svd[:, i]
 
     d_all["num_artists"] = d_all["artists"].apply(
@@ -135,12 +185,13 @@ def make_features(d_train, d_test):
     d_all["main_artist_count"] = d_all["main_artist"].map(artist_counts)
     d_all["is_single"] = (d_all["album_count"] == 1).astype(int)
 
-    threshold = 3
     d_all["album_name"] = d_all["album_name"].apply(
-        lambda x: x if album_counts.get(x, 0) > threshold else "Rare_Album"
+        lambda x: x if album_counts.get(x, 0) > RARE_CATEGORY_THRESHOLD else "Rare_Album"
     )
     d_all["main_artist"] = d_all["main_artist"].apply(
-        lambda x: x if artist_counts.get(x, 0) > threshold else "Rare_Artist"
+        lambda x: x
+        if artist_counts.get(x, 0) > RARE_CATEGORY_THRESHOLD
+        else "Rare_Artist"
     )
 
     d_all["mode_valence_1"] = d_all["mode"] * d_all["valence"]
@@ -155,17 +206,8 @@ def make_features(d_train, d_test):
     d_all["duration_sec"] = d_all["duration_ms"] / 1000
     d_all["dance_energy"] = d_all["danceability"] * d_all["energy"]
 
-    group_keys = ["track_genre", "main_artist"]
-    target_values = [
-        "danceability",
-        "energy",
-        "loudness",
-        "tempo",
-        "acousticness",
-        "duration_ms",
-    ]
-    for key in group_keys:
-        for val in target_values:
+    for key in GROUP_KEYS:
+        for val in AGG_TARGET_VALUES:
             agg = d_all.groupby(key)[val].agg(["mean", "std"]).reset_index()
             agg.columns = [key, f"agg_{key}_{val}_mean", f"agg_{key}_{val}_std"]
             d_all = pd.merge(d_all, agg, on=key, how="left")
@@ -184,20 +226,9 @@ def make_features(d_train, d_test):
         / (d_all["agg_track_genre_duration_ms_std"] + eps)
     ) * 10 + 50
 
-    audio_cols = [
-        "danceability",
-        "energy",
-        "loudness",
-        "speechiness",
-        "acousticness",
-        "instrumentalness",
-        "liveness",
-        "valence",
-        "tempo",
-    ]
     scaler = StandardScaler()
-    audio_scaled = scaler.fit_transform(d_all[audio_cols])
-    kmeans = KMeans(n_clusters=10, random_state=0, n_init=10)
+    audio_scaled = scaler.fit_transform(d_all[AUDIO_COLS])
+    kmeans = KMeans(n_clusters=N_AUDIO_CLUSTERS, random_state=0, n_init=10)
     d_all["audio_cluster"] = kmeans.fit_predict(audio_scaled)
 
     d_all = d_all.drop(columns=["track_id", "track_name", "duration_ms"])
@@ -205,17 +236,7 @@ def make_features(d_train, d_test):
     d_all["album_name"] = d_all["album_name"].fillna("Unknown")
     d_all["track_genre"] = d_all["track_genre"].fillna("Unknown")
 
-    categorical_features = [
-        "artists",
-        "main_artist",
-        "album_name",
-        "explicit",
-        "track_genre",
-        "audio_cluster",
-        "mode",
-        "key",
-        "time_signature",
-    ]
+    categorical_features = BASE_CATEGORICAL_FEATURES.copy()
     categorical_features = [col for col in categorical_features if col not in EXCLUDE_FEATURES]
 
     if EXCLUDE_FEATURES:
@@ -256,32 +277,20 @@ def add_target_encoding(X_train_cv, X_valid_cv, X_test_cv, y_train_cv):
 
 def make_classifier(iterations, random_seed):
     return CatBoostClassifier(
+        **CATBOOST_BASE_PARAMS,
         iterations=iterations,
-        learning_rate=0.06530709863955916,
-        depth=9,
-        l2_leaf_reg=1.6325232667516456,
-        random_strength=6.95927721754944,
-        bagging_temperature=0.3565475988102846,
         loss_function="Logloss",
         eval_metric="AUC",
         random_seed=random_seed,
-        verbose=300,
-        thread_count=-1,
     )
 
 
 def make_regressor(iterations, random_seed):
     return CatBoostRegressor(
+        **CATBOOST_BASE_PARAMS,
         iterations=iterations,
-        learning_rate=0.06530709863955916,
-        depth=9,
-        l2_leaf_reg=1.6325232667516456,
-        random_strength=6.95927721754944,
-        bagging_temperature=0.3565475988102846,
         eval_metric="RMSE",
         random_seed=random_seed,
-        verbose=300,
-        thread_count=-1,
     )
 
 
@@ -408,7 +417,7 @@ def print_cv_report(y_train, oof_reg_preds, oof_positive_probs, threshold):
     )
 
     print("\n--- 閾値別 CV MSE ---")
-    for th in [0.2, 0.3, 0.4, 0.5, 0.6]:
+    for th in THRESHOLD_CANDIDATES:
         preds = np.where(oof_positive_probs < th, 0.0, oof_reg_preds)
         preds = np.clip(preds, 0, 100)
         mse = mean_squared_error(y_train, preds)
