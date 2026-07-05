@@ -379,13 +379,15 @@ train と test の重複数は表示しているが、予測値を正解値で�
 
 ## 実行方法
 以下のディレクトリ構造を用意。
+
+```bash
 project/                
 ├── data/
 │   ├── train.csv          
 │   └── test.csv           
 └── two_stage_model/
     └── two_stage_model.py
-
+```
 フル実行は次の通りである。
 
 ```bash
