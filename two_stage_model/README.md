@@ -84,7 +84,7 @@ def train_two_stage_cv(...):
 
 ## よく変更する場所
 
-他の人が実験しやすいように、変更されやすい値は `two_stage_model.py` の上部にまとめている。
+追加実験しやすいように、変更されやすい値は `two_stage_model.py` の上部にまとめている。
 
 ### SVD の次元数
 
@@ -174,6 +174,9 @@ CATBOOST_BASE_PARAMS = {
     "bagging_temperature": 0.3565475988102846,
     "verbose": 300,
     "thread_count": -1,
+    #ColabなどでGPUを使うなら以下のコメントアウトを取る
+    #"task_type": "GPU",
+    #"devices": "0",
 }
 ```
 
@@ -372,7 +375,7 @@ if t_id in leak_dict:
 
 train と test の重複数は表示しているが、予測値を正解値で上書きすることはしていない。
 
-そのため、`two_stage_model/y_pred_two_stage.csv` は、2 段階モデルによる予測結果である。
+そのため、出力される予測ファイルは、2 段階モデルによる予測結果である。
 
 ## 実行方法
 以下のディレクトリ構造を用意。
@@ -394,8 +397,15 @@ python two_stage_model/two_stage_model.py
 UV_CACHE_DIR=/tmp/uv-cache uv run python two_stage_model/two_stage_model.py --max-rows 1000 --folds 2 --iterations 5
 ```
 
+予測ファイルの保存先ディレクトリを変えたい場合は、`--output-dir` を指定する。
+
+```bash
+python two_stage_model/two_stage_model.py --output-dir two_stage_model/predictions
+```
+
 
 ## Google Colab で実行する方法
+GPUを使用する際は、`CATBOOST_BASE_PARAMS` 内のコメントアウトを外すこと。
 
 まず、必要なライブラリをインストールする。
 
@@ -427,7 +437,7 @@ drive.mount('/content/drive')
 例えば、Google Drive の `MyDrive` 直下に `project` ディレクトリを置いた場合は、次のように移動する。
 
 ```python
-%cd /content/drive/MyDrive/prject
+%cd /content/drive/MyDrive/project
 ```
 
 動作確認だけを軽く行う場合は、行数や学習回数を減らして実行する。
@@ -451,13 +461,33 @@ drive.mount('/content/drive')
 Colab で実行した場合も、予測結果は次のファイルに保存される。
 
 ```text
-two_stage_model/y_pred_two_stage.csv
+two_stage_model/y_pred_two_stage_threshold_0_5.csv
+two_stage_model/y_pred_two_stage_best_threshold_*.csv
+two_stage_model/y_pred_two_stage_prob_mul.csv
 ```
 
 ## 出力ファイル
 
-通常実行すると、次のファイルに予測結果が保存される。
+通常実行すると、次の 3 種類の予測結果が保存される。
 
 ```text
-two_stage_model/y_pred_two_stage.csv
+two_stage_model/y_pred_two_stage_threshold_0_5.csv
+two_stage_model/y_pred_two_stage_best_threshold_*.csv
+two_stage_model/y_pred_two_stage_prob_mul.csv
 ```
+
+`y_pred_two_stage_threshold_0_5.csv` は、実行時に指定した `--threshold` の値を使った閾値方式の予測である。
+
+デフォルトでは `--threshold 0.5` なので、ファイル名は `y_pred_two_stage_threshold_0_5.csv` になる。
+
+`y_pred_two_stage_best_threshold_*.csv` は、CV MSE が最も良かった閾値を自動で選び、その閾値で test を予測したファイルである。
+
+例えば、`threshold=0.6` が最も良かった場合は、次の名前で保存される。
+
+```text
+two_stage_model/y_pred_two_stage_best_threshold_0_6.csv
+```
+
+`y_pred_two_stage_prob_mul.csv` は、分類モデルが出した非0確率を回帰予測に掛ける方式の予測である。
+
+これらのファイルは、学習を複数回行って作っているわけではない。1 回の学習後に、予測値の組み合わせ方だけを変えて保存している。そのため、出力ファイルを増やしても処理時間はほとんど変わらない。
