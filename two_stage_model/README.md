@@ -84,7 +84,7 @@ def train_two_stage_cv(...):
 
 ## よく変更する場所
 
-他の人が実験しやすいように、変更されやすい値は `two_stage_model.py` の上部にまとめている。
+追加実験しやすいように、変更されやすい値は `two_stage_model.py` の上部にまとめている。
 
 ### SVD の次元数
 
@@ -174,6 +174,9 @@ CATBOOST_BASE_PARAMS = {
     "bagging_temperature": 0.3565475988102846,
     "verbose": 300,
     "thread_count": -1,
+    #ColabなどでGPUを使うなら以下のコメントアウトを取る
+    #"task_type": "GPU",
+    #"devices": "0",
 }
 ```
 
@@ -402,6 +405,7 @@ python two_stage_model/two_stage_model.py --output-dir two_stage_model/predictio
 
 
 ## Google Colab で実行する方法
+GPUを使用する際は、`CATBOOST_BASE_PARAMS` 内のコメントアウトを外すこと。
 
 まず、必要なライブラリをインストールする。
 

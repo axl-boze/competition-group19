@@ -71,6 +71,9 @@ CATBOOST_BASE_PARAMS = {
     "bagging_temperature": 0.3565475988102846,
     "verbose": 300,
     "thread_count": -1,
+    #ColabなどでGPUを使うなら以下のコメントアウトを取る
+    #"task_type": "GPU",
+    #"devices": "0",
 }
 
 
